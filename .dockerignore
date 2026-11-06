@@ -1,0 +1,11 @@
+.git
+.venv
+__pycache__
+.pytest_cache
+.pytest-run-*
+.ruff_cache
+.env
+data/*.db*
+imports
+logs
+tests

@@ -1,0 +1,12 @@
+[
+  {
+    "id": "case-001",
+    "question_id": 100,
+    "solution_id": 107,
+    "title": "Проверенный случай",
+    "category": "parental_control",
+    "confirmed": true,
+    "confirmed_by": "reviewer",
+    "confirmed_at": "2026-09-08"
+  }
+]

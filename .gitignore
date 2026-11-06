@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest-run-*/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+logs/
+.venv/
+.env
+data/*.db
+data/*.db-*
+data/pytest-temp-*/
+data/confluence/
+data/knowledge/combined/
+data/knowledge/runtime/
