@@ -10,9 +10,10 @@ services:
         required: false
     environment:
       DATABASE_PATH: /app/runtime/ticket_assistant.db
-      KNOWLEDGE_PATH: /app/data/knowledge
+      KNOWLEDGE_PATH: /app/data/knowledge/runtime
       LLM_PROVIDER: ${LLM_PROVIDER:-mock}
       TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      METABASE_DIAGNOSTICS_ENABLED: ${METABASE_DIAGNOSTICS_ENABLED:-true}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-127.0.0.1,localhost}

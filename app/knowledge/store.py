@@ -132,7 +132,7 @@ class KnowledgeStore:
             for line in file_path.read_text(encoding="utf-8").splitlines():
                 if line.strip():
                     item = json.loads(line)
-                    if item.get("confirmed") is True:
+                    if item.get("confirmed") is True and item.get("retrieval_allowed") is not False:
                         documents.append(item)
         for file_path in sorted(self.path.glob("*.md")):
             text = file_path.read_text(encoding="utf-8").strip()
@@ -199,6 +199,7 @@ class KnowledgeStore:
                     source=str(item.get("source", "local knowledge base")),
                     score=round(min(score, 1.0), 4),
                     required_checks=[str(value) for value in item.get("required_checks", [])],
+                    automatic_answer_allowed=bool(item.get("automatic_answer_allowed", False)),
                 )
             )
         return sorted(matches, key=lambda item: item.score, reverse=True)[:limit]

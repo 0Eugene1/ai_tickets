@@ -62,6 +62,19 @@ class MetabaseTicketSource:
         self.performer_label = settings.metabase_performer_label.strip() or performer
         self.database_id = settings.metabase_database_id
         self.local_timezone = timezone(timedelta(hours=settings.metabase_utc_offset_hours))
+        try:
+            self.active_statuses = tuple(
+                sorted({int(value.strip()) for value in settings.metabase_active_statuses.split(",") if value.strip()})
+            )
+        except ValueError as exc:
+            raise ValueError("METABASE_ACTIVE_STATUSES must contain comma-separated integers") from exc
+        if not self.active_statuses:
+            raise ValueError("METABASE_ACTIVE_STATUSES must contain at least one status")
+        self.max_ticket_age_hours = max(0.0, settings.metabase_max_ticket_age_hours)
+        self.snapshot_key = (
+            "active-statuses=" + ",".join(str(value) for value in self.active_statuses)
+            + f";max-age-hours={self.max_ticket_age_hours:g}"
+        )
         if client_factory is None:
             config = MetabaseConfig(
                 base_url=settings.metabase_base_url or "",
@@ -74,14 +87,19 @@ class MetabaseTicketSource:
         self._client_factory = client_factory
 
     def fetch_current_headers(self) -> dict[int, MetabaseTicketHeader]:
+        statuses = ", ".join(str(value) for value in self.active_statuses)
         query = (
             f"{self._HEADER_SELECT} "
             f"WHERE P.PERFORMER = '{self.performer}' "
+            f"AND P.STATUS IN ({statuses}) "
             "ORDER BY P.DATE_LAST, P.ID_PROBLEM"
         )
         with self._client_factory() as client:
             rows = client.run_native_select(self.database_id, query)
         headers = (self._header(row) for row in rows)
+        if self.max_ticket_age_hours:
+            cutoff = datetime.now(self.local_timezone) - timedelta(hours=self.max_ticket_age_hours)
+            headers = (header for header in headers if header.updated_at >= cutoff)
         return {header.ticket_id: header for header in headers}
 
     def fetch_ticket(self, ticket_id: int, assignment_generation: int) -> TicketInput:

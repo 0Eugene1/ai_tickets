@@ -56,36 +56,50 @@ class TicketAnalyzer:
             evidence.append(Evidence(fact=fact, source="diagnostics.bugshaker_found"))
 
         for check in diagnostics.checks:
-            if check.status in {"found", "ok", "error", "not_found"}:
+            if check.status in {"found", "ok", "error", "not_found", "unavailable"}:
                 value = f": {check.value}" if check.value not in (None, "") else ""
                 fact = f"Проверка «{check.name}» — {check.status}{value}."
                 facts.append(fact)
                 evidence.append(Evidence(fact=fact, source=check.source))
 
         missing: list[str] = []
-        if not diagnostics.platform:
-            missing.append("платформа приложения")
-        if not diagnostics.app_version:
-            missing.append("версия приложения")
-        if not diagnostics.os_version:
-            missing.append("версия ОС")
         if not meaningful:
             missing.append("содержательное описание актуальной проблемы")
         if screenshot_only:
             missing.append("содержимое скриншота или текст ошибки")
             missing.append("экран, действия пользователя и фактический результат")
 
-        required = [
-            "проверить актуальность версии приложения",
-            "проверить наличие баготряски и период собранных логов",
-            "сверить симптомы с известными подтверждёнными случаями",
-        ]
+        category_checks = {
+            "authentication": ["Сверить время и результат последних попыток авторизации в read-only диагностике."],
+            "payment": ["Сверить состояние конкретной операции оплаты и услугу, на которую она зачислена."],
+            "intercom_calls": ["Проверить привязку устройства и состояние доставки домофонного вызова."],
+            "door_access": ["Проверить права абонента и актуальную привязку двери к договору."],
+            "camera_archive": ["Проверить доступность камеры и права на архив для выбранного договора."],
+            "notifications": ["Проверить состояние push-разрешений и регистрацию устройства в доступной диагностике."],
+            "service_display": ["Сверить подключённые услуги и договор, выбранный в приложении."],
+            "contract_selection": ["Проверить связи мастер-аккаунта, договоров и адресов."],
+        }
+        required = list(category_checks.get(classification.category, []))
+        app_categories = {
+            "authentication",
+            "app_stability",
+            "intercom_calls",
+            "door_access",
+            "camera_archive",
+            "notifications",
+            "device",
+        }
+        if classification.category in app_categories and not any(
+            (diagnostics.platform, diagnostics.app_version, diagnostics.os_version)
+        ):
+            required.append(
+                "Проверить профиль устройства и версии в read-only диагностике; не запрашивать эти данные у оператора, если они доступны системе."
+            )
         if classification.category == "parental_control":
             required.extend(
                 [
                     "проверить договор, выбранный в приложении",
                     "проверить ответ API списка подключённых услуг",
-                    "проверить логи за точное время воспроизведения",
                 ]
             )
         if screenshot_only:
@@ -145,10 +159,12 @@ class TicketAnalyzer:
             base = "По тексту тикета симптом определить нельзя: проблема описана только на скриншоте."
         elif classification.category == "parental_control":
             base = "Повторно подключать услугу до проверки её состояния не требуется."
+        elif not missing:
+            base = "Менеджеру следует проверить факты и выполнить указанные выше целевые проверки."
         else:
-            base = "Для продолжения разбора требуется проверить исходные данные обращения."
+            base = "Доступных данных пока недостаточно для обоснованного вывода."
         if missing:
-            return f"{base} Уточните: {', '.join(missing)}."
+            return f"{base} Не хватает: {', '.join(missing)}."
         return base
 
     @staticmethod
@@ -182,7 +198,7 @@ class TicketAnalyzer:
             sections.append(section("Кандидаты из истории — совпадение причины ещё не подтверждено", similar))
         sections.extend(
             [
-                f"### Черновик ответа оператору\n{result.operator_reply}",
+                f"### Рекомендация менеджеру\n{result.operator_reply}",
                 section("Не хватает данных", result.missing_information),
             ]
         )

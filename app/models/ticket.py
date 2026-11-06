@@ -73,6 +73,7 @@ class SimilarCase(BaseModel):
     required_checks: list[str] = Field(default_factory=list)
     match_status: Literal["candidate", "relevant", "partial", "rejected"] = "candidate"
     match_reason: str | None = None
+    automatic_answer_allowed: bool = False
 
 
 class TicketAnalysis(BaseModel):

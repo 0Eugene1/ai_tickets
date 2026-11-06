@@ -7,6 +7,7 @@ import logging
 import re
 
 from app.integrations.metabase_tickets import MetabaseTicketSource
+from app.integrations.metabase_diagnostics import MetabaseDiagnosticsProvider
 from app.analyzers.message_filter import split_messages
 from app.models.ticket import TicketAnalysis, TicketInput
 from app.privacy.redactor import Redactor
@@ -25,6 +26,9 @@ class PollResult:
     delivered_count: int
     failed_count: int
     deferred_count: int
+    quarantined_count: int
+    cancelled_count: int
+    snapshot_ignored: bool
 
 
 class MetabaseMonitor:
@@ -38,6 +42,7 @@ class MetabaseMonitor:
         poll_interval_seconds: float,
         empty_ticket_grace_seconds: float,
         baseline_on_first_run: bool,
+        diagnostics: MetabaseDiagnosticsProvider | None = None,
     ) -> None:
         self.source = source
         self.repository = repository
@@ -46,6 +51,7 @@ class MetabaseMonitor:
         self.poll_interval_seconds = max(5.0, poll_interval_seconds)
         self.empty_ticket_grace_seconds = max(0.0, empty_ticket_grace_seconds)
         self.baseline_on_first_run = baseline_on_first_run
+        self.diagnostics = diagnostics
         self._stop = asyncio.Event()
 
     async def poll_once(self) -> PollResult:
@@ -54,10 +60,23 @@ class MetabaseMonitor:
             self.source.performer,
             set(headers),
             baseline_on_first_run=self.baseline_on_first_run,
+            snapshot_key=getattr(self.source, "snapshot_key", "default"),
         )
         delivered = 0
         failed = 0
         deferred = 0
+        if snapshot.snapshot_ignored:
+            return PollResult(
+                baseline_created=False,
+                current_count=snapshot.current_count,
+                detected_count=0,
+                delivered_count=0,
+                failed_count=0,
+                deferred_count=0,
+                quarantined_count=0,
+                cancelled_count=0,
+                snapshot_ignored=True,
+            )
         for event in self.repository.claim_pending(self.source.performer):
             try:
                 if event.task_id:
@@ -84,16 +103,11 @@ class MetabaseMonitor:
                         deferred += 1
                         continue
                     if not meaningful:
-                        if not event.content_notice_sent:
-                            await self.task_service.telegram.send(
-                                format_waiting_for_content_notification(
-                                    ticket,
-                                    assignment_detected_at=event.detected_at,
-                                )
-                            )
                         self.repository.mark_waiting_for_content(event.event_id)
                         deferred += 1
                         continue
+                    if self.diagnostics is not None:
+                        ticket = await asyncio.to_thread(self.diagnostics.enrich, ticket)
                     record, created = self.task_service.start(ticket)
                     if created:
                         result = await self.task_service.process(record.task_id, notify=False)
@@ -131,6 +145,9 @@ class MetabaseMonitor:
             delivered_count=delivered,
             failed_count=failed,
             deferred_count=deferred,
+            quarantined_count=snapshot.quarantined_count,
+            cancelled_count=snapshot.cancelled_count,
+            snapshot_ignored=False,
         )
 
     async def run_forever(self) -> None:
@@ -147,14 +164,31 @@ class MetabaseMonitor:
                         "Metabase baseline saved with %s current tickets; no historical notifications sent",
                         result.current_count,
                     )
-                elif result.detected_count or result.failed_count or result.deferred_count:
+                elif result.snapshot_ignored:
+                    logger.error(
+                        "Metabase snapshot rejected by drop guard: current=%s; state was not changed",
+                        result.current_count,
+                    )
+                elif result.quarantined_count:
+                    logger.error(
+                        "Metabase assignment burst quarantined: current=%s quarantined=%s",
+                        result.current_count,
+                        result.quarantined_count,
+                    )
+                elif (
+                    result.detected_count
+                    or result.failed_count
+                    or result.deferred_count
+                    or result.cancelled_count
+                ):
                     logger.info(
-                        "Metabase poll: current=%s detected=%s delivered=%s failed=%s deferred=%s",
+                        "Metabase poll: current=%s detected=%s delivered=%s failed=%s deferred=%s cancelled=%s",
                         result.current_count,
                         result.detected_count,
                         result.delivered_count,
                         result.failed_count,
                         result.deferred_count,
+                        result.cancelled_count,
                     )
             except Exception:
                 logger.exception("Metabase polling cycle failed")
@@ -226,7 +260,7 @@ def format_assignment_notification(
         )[0]
         status = "подходит" if case.match_status == "relevant" else "частично похож"
         similar = (
-            "\n\n📚 Похожий случай: "
+            "\n\n📚 Похожий случай (историческая подсказка, не готовый ответ): "
             f"{clip(case.title, 180)} ({status})\n"
             f"{clip(case.resolution, 300)}"
         )
@@ -251,30 +285,9 @@ def format_assignment_notification(
         f"Вердикт:\n{verdict or '• Причину определить нельзя по доступным данным.'}\n\n"
         f"Проверить:\n{checks_text or '1. Уточнить описание проблемы.'}"
         f"{similar}\n\n"
-        f"💬 Оператору: {reply}\n\n"
+        f"💬 Менеджеру: {reply}\n\n"
         "⚠️ Предварительный результат — требуется проверка сотрудником."
     )
     # Notifications must always fit one Telegram message. The full analysis
     # remains available in SQLite/API for audit, but is not dumped into chat.
     return text if len(text) <= 3800 else text[:3740].rstrip() + "\n\n…полный разбор сохранён в системе."
-
-
-def format_waiting_for_content_notification(
-    ticket: TicketInput,
-    *,
-    assignment_detected_at: datetime,
-) -> str:
-    detected_local = assignment_detected_at.astimezone(ticket.created_at.tzinfo)
-    subscriber = f"*{ticket.subscriber.id_abon}" if ticket.subscriber.id_abon else "не указан"
-    return (
-        "🚨 НОВЫЙ ТИКЕТ ДЛЯ " + ticket.performer + "\n\n"
-        f"🎟 Тикет {ticket.ticket_number}\n"
-        f"📱 Абонент: {subscriber}\n"
-        f"📅 Создано: {ticket.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-        f"📥 Назначение обнаружено: {detected_local.strftime('%d.%m.%Y %H:%M')}\n"
-        f"📌 Тема: {ticket.subject}\n\n"
-        "📝 История обращения ещё не появилась в доступной выгрузке Metabase. "
-        "Это не означает, что внутри тикета нет комментариев.\n\n"
-        "⏳ ИИ-разбор отложен: сервис продолжит проверять тикет и пришлёт "
-        "отдельный короткий разбор, когда комментарии синхронизируются."
-    )

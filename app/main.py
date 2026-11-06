@@ -11,6 +11,7 @@ from app.api.routes import router
 from app.config import Settings, get_settings
 from app.integrations.llm import build_llm_provider
 from app.integrations.metabase_tickets import MetabaseTicketSource
+from app.integrations.metabase_diagnostics import MetabaseDiagnosticsProvider
 from app.integrations.telegram import TelegramNotifier
 from app.knowledge.store import KnowledgeStore
 from app.privacy.redactor import Redactor
@@ -39,14 +40,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     monitor: MetabaseMonitor | None = None
     if settings.metabase_polling_enabled:
+        try:
+            retry_delays = tuple(
+                float(value.strip())
+                for value in settings.metabase_retry_delays_seconds.split(",")
+                if value.strip()
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "METABASE_RETRY_DELAYS_SECONDS must contain comma-separated numbers"
+            ) from exc
+        source = MetabaseTicketSource(settings)
         monitor = MetabaseMonitor(
-            source=MetabaseTicketSource(settings),
-            repository=MonitorRepository(settings.database_path),
+            source=source,
+            repository=MonitorRepository(
+                settings.database_path,
+                departure_confirmation_polls=settings.metabase_departure_confirmation_polls,
+                snapshot_drop_guard_fraction=settings.metabase_snapshot_drop_guard_fraction,
+                snapshot_drop_guard_min_size=settings.metabase_snapshot_drop_guard_min_size,
+                max_new_events_per_poll=settings.metabase_max_new_events_per_poll,
+                rebaseline_after_seconds=settings.metabase_rebaseline_after_seconds,
+                pending_ttl_hours=settings.metabase_pending_ttl_hours,
+                retry_delays_seconds=retry_delays,
+            ),
             task_service=task_service,
             redactor=redactor,
             poll_interval_seconds=settings.metabase_poll_interval_seconds,
             empty_ticket_grace_seconds=settings.metabase_empty_ticket_grace_seconds,
             baseline_on_first_run=settings.metabase_baseline_on_first_run,
+            diagnostics=MetabaseDiagnosticsProvider(settings),
         )
 
     @asynccontextmanager

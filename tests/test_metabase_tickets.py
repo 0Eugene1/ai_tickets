@@ -34,6 +34,7 @@ def _settings(tmp_path: Path) -> Settings:
         metabase_performer_label="@Valeri_Nikulina",
         metabase_polling_enabled=False,
         metabase_utc_offset_hours=7,
+        metabase_max_ticket_age_hours=0,
     )
 
 
@@ -59,7 +60,21 @@ def test_reads_only_current_performer_headers(tmp_path: Path) -> None:
     assert list(headers) == [68548052]
     assert headers[68548052].ticket_number == "68-548-052"
     assert "P.PERFORMER = 'NIKULINA_VS'" in fake.queries[0]
+    assert "P.STATUS IN (0)" in fake.queries[0]
     assert headers[68548052].created_at.utcoffset() == timedelta(hours=7)
+
+
+def test_excludes_stale_headers_even_if_performer_is_still_set(tmp_path: Path) -> None:
+    stale = _header()
+    stale["DATE_CREATE"] = "2025-01-01T10:00:00"
+    stale["DATE_LAST"] = "2025-01-01T10:01:00"
+    settings = _settings(tmp_path).model_copy(
+        update={"metabase_max_ticket_age_hours": 72}
+    )
+    fake = FakeMetabaseClient([[stale]])
+    source = MetabaseTicketSource(settings, client_factory=lambda: fake)
+
+    assert source.fetch_current_headers() == {}
 
 
 def test_builds_ticket_with_history_and_assignment_generation(tmp_path: Path) -> None:

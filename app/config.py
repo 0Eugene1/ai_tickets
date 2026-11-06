@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     metabase_poll_interval_seconds: float = 60.0
     metabase_empty_ticket_grace_seconds: float = 300.0
     metabase_baseline_on_first_run: bool = True
+    metabase_active_statuses: str = "0"
+    metabase_max_ticket_age_hours: float = 72.0
+    metabase_departure_confirmation_polls: int = 3
+    metabase_snapshot_drop_guard_fraction: float = 0.5
+    metabase_snapshot_drop_guard_min_size: int = 10
+    metabase_max_new_events_per_poll: int = 10
+    metabase_rebaseline_after_seconds: float = 3600.0
+    metabase_pending_ttl_hours: float = 24.0
+    metabase_retry_delays_seconds: str = "300,900,1800,3600"
+    metabase_diagnostics_enabled: bool = False
+    metabase_diagnostics_max_age_days: float = 90.0
     metabase_utc_offset_hours: int = 7
     metabase_timeout_seconds: float = 30.0
     metabase_allow_insecure_http: bool = False
