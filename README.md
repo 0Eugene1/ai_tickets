@@ -104,6 +104,14 @@ LLM_MODEL=...
 
 Markdown-файлы считаются вручную курированными материалами. Поиск MVP лексический; его можно заменить векторным индексом без изменения API.
 
+Подтверждённые реальные кейсы сохраняются в `data/knowledge/reviewed/manual-*.jsonl`.
+Docker при сборке добавляет их в `runtime/manual-knowledge.jsonl` вместе с Telegram
+и Confluence. Допускаются только `confirmed: true`, без запрета retrieval, с
+`automatic_answer_allowed: false`. Поля `resolution` и `required_checks` должны
+содержать подтверждённый вердикт и границы его применения. История расследований
+в `manual-review*.jsonl` остаётся вне рабочего каталога; получение вердикта не
+означает автоматического закрытия тикета.
+
 ### Импорт Telegram
 
 Соседство сообщений и даже `reply_to` сами по себе не считаются подтверждением. Нужен отдельный, вручную проверенный manifest с точными `question_id`, `solution_id` и `confirmed: true`; пример — `examples/telegram-confirmations.json`.
